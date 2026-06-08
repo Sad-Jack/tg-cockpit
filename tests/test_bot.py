@@ -126,6 +126,43 @@ def test_fmt_tool_input_truncates_long():
     assert out.endswith("…") and len(out) <= 401
 
 
+class _BtnMsg:
+    """Сообщение с кнопками подтверждения: пишет вызовы edit/answer для проверок."""
+
+    def __init__(self, fail_edit: bool = False) -> None:
+        self.fail_edit = fail_edit
+        self.edited: list = []        # (text, reply_markup)
+        self.markup_cleared = 0
+        self.answered: list[str] = []
+
+    async def edit_text(self, text, reply_markup=None, **kw):
+        if self.fail_edit:
+            raise RuntimeError("message can't be edited")
+        self.edited.append((text, reply_markup))
+
+    async def edit_reply_markup(self, reply_markup=None, **kw):
+        self.markup_cleared += 1
+
+    async def answer(self, text, **kw):
+        self.answered.append(text)
+
+
+async def test_resolve_buttons_edits_and_drops_keyboard():
+    m = _BtnMsg()
+    await bot._resolve_buttons(m, "✅ Выполнено: пост")
+    # текст исходного сообщения заменён на итог, клавиатура снята (reply_markup=None)
+    assert m.edited == [("✅ Выполнено: пост", None)]
+    assert m.answered == []  # без дублирующего сообщения
+
+
+async def test_resolve_buttons_fallback_when_edit_fails():
+    m = _BtnMsg(fail_edit=True)
+    await bot._resolve_buttons(m, "✖️ Отменено")
+    # не вышло отредактировать → хотя бы убрать кнопки и прислать итог отдельным сообщением
+    assert m.markup_cleared == 1
+    assert m.answered == ["✖️ Отменено"]
+
+
 class _Target:
     """Заглушка для .answer (Message / callback_query.message)."""
 

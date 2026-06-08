@@ -459,6 +459,27 @@ async def _present_pending(target: Any, channel: str) -> None:
         )
 
 
+async def _resolve_buttons(message: Any, text: str) -> None:
+    """Закрыть карточку подтверждения: заменить текст на итог и УБРАТЬ кнопки ✅/✖️.
+
+    Так после нажатия клавиатура исчезает (нельзя нажать повторно). Если отредактировать
+    сообщение не вышло (старое/уже изменено) — хотя бы снимаем кнопки и шлём итог отдельно.
+    """
+    try:
+        await message.edit_text(text, reply_markup=None)
+        return
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        await message.edit_reply_markup(reply_markup=None)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        await message.answer(text)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def _send_md(target: Any, text: str) -> None:
     """Отправить текст агента, отрендерив Markdown→Telegram-HTML (фолбэк в plain при сбое)."""
     from ..util.formatting import md_to_telegram_html
@@ -543,14 +564,14 @@ def build_dispatcher(allowed: set[int] | None = None) -> "Dispatcher":
 
         rec = pending.pop_by_id(pid)
         if not rec:
-            await cq.message.answer("Действие уже выполнено или отменено.")
+            await _resolve_buttons(cq.message, "⌛ Действие уже выполнено или отменено.")
             return
         try:
             await pending.execute(rec)
         except Exception as e:  # noqa: BLE001
-            await cq.message.answer(f"❌ {e}")
+            await _resolve_buttons(cq.message, f"❌ Не выполнено: {rec['desc']}\n{e}")
             return
-        await cq.message.answer(f"✅ Выполнено: {rec['desc']}")
+        await _resolve_buttons(cq.message, f"✅ Выполнено: {rec['desc']}")
 
     @dp.callback_query(F.data.startswith("undo:"))
     async def _undo(cq: "CallbackQuery") -> None:
@@ -562,7 +583,7 @@ def build_dispatcher(allowed: set[int] | None = None) -> "Dispatcher":
 
         pending.pop_by_id(pid)
         await cq.answer("Отменено")
-        await cq.message.answer("✖️ Отменено, публиковать не буду.")
+        await _resolve_buttons(cq.message, "✖️ Отменено, публиковать не буду.")
 
     @dp.callback_query(F.data == "add")
     async def _cb_add(cq: "CallbackQuery") -> None:
