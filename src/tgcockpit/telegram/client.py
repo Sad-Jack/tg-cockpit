@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import stat
+import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -20,6 +22,25 @@ from ..util.logging import get_logger
 from ..util.ratelimit import with_floodwait
 
 log = get_logger("client")
+
+# Сессия Telethon — это один SQLite-файл (.session). Параллельные клиенты на нём дают
+# "database is locked" (напр. пользователь жмёт несколько кнопок ✅ подряд → хэндлеры
+# бота лезут в сессию одновременно). Поэтому весь сеанс connected() идёт под локом —
+# строго по одному за раз. Лок — на каждый event loop свой (WeakKeyDictionary), чтобы не
+# падать между разными asyncio.run (CLI/тесты создают новый цикл на каждый вызов).
+_session_locks: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _session_lock() -> asyncio.Lock:
+    """Лок сериализации доступа к SQLite-сессии, привязанный к текущему event loop."""
+    loop = asyncio.get_running_loop()
+    lock = _session_locks.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _session_locks[loop] = lock
+    return lock
 
 
 def build_client(secrets: Secrets | None = None) -> TelegramClient:
@@ -54,17 +75,19 @@ async def connected(secrets: Secrets | None = None) -> AsyncIterator[TelegramCli
     Если сессии нет/она невалидна — бросает понятную ошибку (запусти ``auth``).
     """
     secrets = secrets or load_secrets()
-    client = build_client(secrets)
-    await client.connect()
-    try:
-        if not await client.is_user_authorized():
-            raise RuntimeError(
-                "Нет валидной сессии. Сначала выполни: tgcockpit auth"
-            )
-        _harden_session_perms(secrets.account)
-        yield client
-    finally:
-        await client.disconnect()
+    # под локом: пока один клиент держит сессию, второй ждёт — без "database is locked"
+    async with _session_lock():
+        client = build_client(secrets)
+        await client.connect()
+        try:
+            if not await client.is_user_authorized():
+                raise RuntimeError(
+                    "Нет валидной сессии. Сначала выполни: tgcockpit auth"
+                )
+            _harden_session_perms(secrets.account)
+            yield client
+        finally:
+            await client.disconnect()
 
 
 async def interactive_login(secrets: Secrets | None = None) -> User:
