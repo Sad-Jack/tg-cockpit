@@ -1,0 +1,42 @@
+# --- Секреты: НИКОГДА не коммитим (полный доступ к аккаунту) ---
+secrets/
+*.session
+*.session-journal
+.env
+
+# --- Рабочие пространства каналов/групп: ПРИВАТНЫЕ, в git НЕ попадают ---
+# (config.yaml, CLAUDE.md, drafts, insights, skills/voice.md, Obsidian-vault, data) — всё локально.
+channels/*
+!channels/.gitkeep
+
+# --- Логи ---
+logs/*
+!logs/.gitkeep
+
+# --- Runtime-состояние бота (активная сущность, chat id, session) ---
+.state/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# --- Тестовый/инструментальный мусор ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Claude Code: общий settings.json коммитим, локальный оверрайд — нет ---
+.claude/settings.local.json
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+.DS_Store
